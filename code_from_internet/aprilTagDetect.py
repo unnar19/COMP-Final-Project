@@ -3,10 +3,49 @@
 import copy
 import time
 import argparse
+import numpy as np
 
 import cv2 as cv
 from pupil_apriltags import Detector
 
+def draw_cube(image, tag, elapsed_time):
+    # Get tag pose information
+    pose = tag.pose_R
+    tvec = tag.pose_t
+
+    # Cube vertices in 3D space
+    cube_size = 50
+    cube_vertices = cube_size * np.array([
+        [-0.5, -0.5, 0.5],
+        [0.5, -0.5, 0.5],
+        [0.5, 0.5, 0.5],
+        [-0.5, 0.5, 0.5],
+        [-0.5, -0.5, -0.5],
+        [0.5, -0.5, -0.5],
+        [0.5, 0.5, -0.5],
+        [-0.5, 0.5, -0.5]
+    ])
+
+    # Project cube vertices onto the image plane
+    cube_vertices_image, _ = cv.projectPoints(cube_vertices, pose, tvec)
+
+    # Draw lines to represent the cube
+    cube_edges = [
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7)
+    ]
+
+    for edge in cube_edges:
+        start_point = tuple(map(int, cube_vertices_image[edge[0]].ravel()))
+        end_point = tuple(map(int, cube_vertices_image[edge[1]].ravel()))
+        cv.line(image, start_point, end_point, (0, 255, 0), 2)
+
+    # Display elapsed time
+    cv.putText(image, "Elapsed Time:" + '{:.1f}'.format(elapsed_time * 1000) + "ms", (10, 30),
+               cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv.LINE_AA)
+
+    return image
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -82,6 +121,7 @@ def main():
 
         # 描画 ################################################################
         debug_image = draw_tags(debug_image, tags, elapsed_time)
+        debug_image = draw_cube(debug_image, tags, elapsed_time)
 
         elapsed_time = time.time() - start_time
 
@@ -104,6 +144,7 @@ def draw_tags(
 ):
     for tag in tags:
         tag_family = tag.tag_family
+        
         tag_id = tag.tag_id
         center = tag.center
         corners = tag.corners
