@@ -67,14 +67,13 @@ def main():
             tag_size=None,
         )
 
-
-        tag_size = 10  # Size of the tag in your desired units
-        scale_factor = 5.0  # Adjust this to change the size of the cube
+        tag_size = 1.0  # Size of the tag in your desired units
+        scale_factor = 1.7  # Adjust this to change the size of the cube
 
         for tag in tags:
             if tag.tag_id == 0:
                 #print(tag)
-                overlay_image_onto_tag1(frame, proj_image, tag)
+                overlay_image_over_tag(frame, proj_image, tag)
                 draw_cube(frame, np.array(tag.corners, dtype='float32'), tag_size, scale_factor)
         
         cv.imshow('AprilTag Image Projection', frame)
@@ -85,7 +84,7 @@ def main():
     cap.release()
     cv.destroyAllWindows()
 
-def overlay_image_onto_tag1(frame, proj_image, tag):
+def overlay_image_over_tag(frame, proj_image, tag):
     # Define corners of the image to project
     h, w = proj_image.shape[:2]
 
@@ -122,15 +121,22 @@ def overlay_image_onto_tag1(frame, proj_image, tag):
 
     # Overlay the image
     frame[mask > 0] = warped_image[mask > 0]
+    
 
-def draw_cube(frame, corners, tag_size = 1.0, scale_factor = 1.0):
-    # Adjust the size of the cube by applying the scale factor
+def draw_cube(frame, corners, tag_size, scale_factor):
+    # Define the 3D points of the AprilTag (assuming it lies in the XY plane with Z=0)
+    tag_half = tag_size / 2.0
+    tag_points_3d = np.float32([
+        [-tag_half, -tag_half, 0], [tag_half, -tag_half, 0], 
+        [tag_half, tag_half, 0], [-tag_half, tag_half, 0]
+    ])
+
+    # Define the 3D points of the cube (scaled)
     cube_size = tag_size * scale_factor
     half_size = cube_size / 2.0
-
     cube_corners_3d = np.float32([
-        [half_size, half_size, 0], [half_size, -half_size, 0], [-half_size, -half_size, 0], [-half_size, half_size, 0],
-        [half_size, half_size, cube_size], [half_size, -half_size, cube_size], [-half_size, -half_size, cube_size], [-half_size, half_size, cube_size]
+        [-half_size, -half_size, 0], [half_size, -half_size, 0], [half_size, half_size, 0], [-half_size, half_size, 0],
+        [-half_size, -half_size, -cube_size], [half_size, -half_size, -cube_size], [half_size, half_size, -cube_size], [-half_size, half_size, -cube_size]
     ])
 
     # Camera parameters (assumed)
@@ -145,10 +151,10 @@ def draw_cube(frame, corners, tag_size = 1.0, scale_factor = 1.0):
     # Assuming no lens distortion
     dist_coeffs = np.zeros((4, 1))
 
-    # Estimate the pose of the tag
-    ret, rvec, tvec = cv.solvePnP(cube_corners_3d[:4], corners, camera_matrix, dist_coeffs)
+    # Estimate the pose of the AprilTag
+    ret, rvec, tvec = cv.solvePnP(tag_points_3d, corners, camera_matrix, dist_coeffs)
 
-    # Project the 3D points to the image plane
+    # Project the 3D points of the cube to the image plane
     imgpts, _ = cv.projectPoints(cube_corners_3d, rvec, tvec, camera_matrix, dist_coeffs)
 
     imgpts = np.int32(imgpts).reshape(-1, 2)
@@ -162,7 +168,6 @@ def draw_cube(frame, corners, tag_size = 1.0, scale_factor = 1.0):
 
     # Draw the top
     cv.drawContours(frame, [imgpts[4:]], -1, (0, 0, 255), 3)
-
 
 if __name__ == '__main__':
     main()
