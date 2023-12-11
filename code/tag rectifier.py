@@ -42,7 +42,7 @@ def fix_corners(corners, ids):
 
     return corners
 
-def find_cube_corners(frame, corners):
+def find_cube_corners(corners):
     tag_points_3d = np.float32([
         [-0.5, -0.5, 0], [0.5, -0.5, 0], 
         [0.5, 0.5, 0], [-0.5, 0.5, 0]
@@ -105,8 +105,14 @@ camera_matrix = np.array(
 # Assuming no lens distortion
 dist_coeffs = np.zeros((4, 1))
 
+# FPS variables
+prev_time = time.time()
+keep_delta = []
+print_delta = 0
+print_fps = 0
+
 while(True):
-    time.sleep(1/20)
+    #time.sleep(1/20)
 
     ret, frame = cap.read()
     frame = cv2.resize(frame, (640, 480))
@@ -123,7 +129,7 @@ while(True):
 
         corners = fix_corners(corners, ids)
         corners = scale(corners,1.7)
-        cube = find_cube_corners(frame,corners)
+        cube = find_cube_corners(corners)
         holo_points = get_holo_points(cube)
 
         # for i in range(len(cube)):
@@ -139,6 +145,19 @@ while(True):
         rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
         not_black = np.all(rectified_image != 0, axis=-1)
         frame[not_black] = rectified_image[not_black]
+
+
+    time_delta = time.time() - prev_time
+    prev_time = time.time()
+    keep_delta.append(time_delta)
+    if len(keep_delta) == 30:
+        print_delta = np.mean(keep_delta) * 1000
+        print_fps = 1/np.mean(keep_delta)
+
+        keep_delta, keep_score = [], []
+
+    cv2.putText(frame, f"{'FPS: '} {print_fps:.2f}",(8,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(0,0,0),1, cv2.LINE_AA)
+    cv2.putText(frame, f"{'Delay:'} {print_delta:.0f} ms",(8,36), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(0,0,0),1, cv2.LINE_AA)
 
     cv2.imshow('frame',frame)
 
