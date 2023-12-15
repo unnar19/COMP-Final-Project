@@ -141,6 +141,14 @@ def glow_effect(no_bg):
 
     return no_bg
 
+def draw_cube_texture(corners):
+    transformation_matrix = cv2.getPerspectiveTransform(img_corners, np.array(corners,dtype="float32"))
+    rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
+    not_black = np.all(rectified_image != 0, axis=-1)
+    frame1[not_black] = rectified_image[not_black]
+
+
+# laptop cam
 webcam = cv2.VideoCapture(0)
 (widthweb,heightweb) = (int(webcam.get(3)), int(webcam.get(4)))
 
@@ -150,6 +158,7 @@ os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;udp;buffer_size;2'
 cap = cv2.VideoCapture('rtsp://10.6.15.171/video', cv2.CAP_FFMPEG)
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 (width,height) = (int(cap.get(3)), int(cap.get(4)))
+
 
 apriltag_dict = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
 param = aruco.DetectorParameters()
@@ -197,7 +206,7 @@ while(True):
 
     now = time.time()
     frames = int(30*(now-last_time))
-    for _ in range(frames + 2):
+    for _ in range(frames + 5):
         ret, frame = cap.read()
 
     frame = cv2.resize(frame,(853,480))
@@ -212,10 +221,9 @@ while(True):
 
     # cut background
     no_bg = segmentor.removeBG(frame, background_image, cutThreshold=0.05)
-    
     # add glow effect
     no_bg = glow_effect(no_bg)
-
+    
     cv2.imshow("Cropped BG removed", no_bg)
 
     if box_in_frame:
@@ -224,7 +232,6 @@ while(True):
     if ids is not None:
         box_in_frame = True
         AR_active += 1
-        
 
         idx = np.argmax(ids)
         corners = np.array([corners[idx]], dtype="float32")
@@ -233,79 +240,35 @@ while(True):
         corners = fix_corners(corners, ids)
         corners = scale(corners,1.8)
         cube = find_cube_corners(corners)
-        holo_points = get_holo_points(cube,ids[0])
-
-        # Draw corner points
-        #for i in range(len(cube)):
-        #    cv2.circle(frame1,cube[i],4,(255),4)
-        #    cv2.putText(frame1,str(i),cube[i],cv2.FONT_HERSHEY_SIMPLEX,1.0,(255,255,0),1)
-
         center_corner_index = find_center_corner(cube)
-
+        
+        holo_points = get_holo_points(cube,ids[0])
         (holo_w,holo_h) = (640,480)
         holo_corners = np.array([[(0,0), (holo_w,0), (holo_w, holo_h), (0, holo_h)]], dtype="float32")
 
         transformation_matrix = cv2.getPerspectiveTransform(holo_corners, np.array(holo_points, dtype="float32"))
-        rectified_image = cv2.warpPerspective(no_bg, transformation_matrix, (640, 480))
-        # combine rectified image with frame 1
-        frame1 = cv2.add(rectified_image, frame1)
+        rectified_hologram = cv2.warpPerspective(no_bg, transformation_matrix, (640, 480))
+        frame1 = cv2.add(rectified_hologram, frame1)
+        #alpha = 0.5
+        #frame1 = cv2.addWeighted(rectified_hologram, alpha, frame1, 1 - alpha, 0)
 
-        transformation_matrix = cv2.getPerspectiveTransform(img_corners, corners[0])
-        rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
-        not_black = np.all(rectified_image != 0, axis=-1)
-        frame1[not_black] = rectified_image[not_black]
-
+        draw_cube_texture(corners[0])
         # Draw only the faces connected to the center corner
         if center_corner_index == 0:
-            transformation_matrix = cv2.getPerspectiveTransform(img_corners, np.array([cube[0],cube[4],cube[5],cube[1]],dtype="float32"))
-            rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
-            not_black = np.all(rectified_image != 0, axis=-1)
-            frame1[not_black] = rectified_image[not_black]
-
-            transformation_matrix = cv2.getPerspectiveTransform(img_corners, np.array([cube[3],cube[7],cube[4],cube[0]],dtype="float32"))
-            rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
-            not_black = np.all(rectified_image != 0, axis=-1)
-            frame1[not_black] = rectified_image[not_black]
-
+            draw_cube_texture([cube[0],cube[4],cube[5],cube[1]])
+            draw_cube_texture([cube[3],cube[7],cube[4],cube[0]])
         elif center_corner_index == 1:
-            # Draw faces 1-5-6-2 and 1-5-4-0
-            transformation_matrix = cv2.getPerspectiveTransform(img_corners, np.array([cube[1],cube[5],cube[6],cube[2]],dtype="float32"))
-            rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
-            not_black = np.all(rectified_image != 0, axis=-1)
-            frame1[not_black] = rectified_image[not_black]
-
-            transformation_matrix = cv2.getPerspectiveTransform(img_corners, np.array([cube[1],cube[5],cube[4],cube[0]],dtype="float32"))
-            rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
-            not_black = np.all(rectified_image != 0, axis=-1)
-            frame1[not_black] = rectified_image[not_black]
+            draw_cube_texture([cube[1],cube[5],cube[6],cube[2]])
+            draw_cube_texture([cube[1],cube[5],cube[4],cube[0]])
         elif center_corner_index == 2:
-            # Draw faces 2-6-7-3 and 2-6-5-1
-            transformation_matrix = cv2.getPerspectiveTransform(img_corners, np.array([cube[2],cube[6],cube[7],cube[3]],dtype="float32"))
-            rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
-            not_black = np.all(rectified_image != 0, axis=-1)
-            frame1[not_black] = rectified_image[not_black]
-
-            transformation_matrix = cv2.getPerspectiveTransform(img_corners, np.array([cube[2],cube[1],cube[5],cube[6]],dtype="float32"))
-            rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
-            not_black = np.all(rectified_image != 0, axis=-1)
-            frame1[not_black] = rectified_image[not_black]
-
+            draw_cube_texture([cube[2],cube[6],cube[7],cube[3]])
+            draw_cube_texture([cube[2],cube[1],cube[5],cube[6]])
         elif center_corner_index == 3:
-            # Draw faces 3-7-4-0 and 3-7-6-2
-            transformation_matrix = cv2.getPerspectiveTransform(img_corners, np.array([cube[3],cube[7],cube[4],cube[0]],dtype="float32"))
-            rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
-            not_black = np.all(rectified_image != 0, axis=-1)
-            frame1[not_black] = rectified_image[not_black]
-
-            transformation_matrix = cv2.getPerspectiveTransform(img_corners, np.array([cube[3],cube[7],cube[6],cube[2]],dtype="float32"))
-            rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
-            not_black = np.all(rectified_image != 0, axis=-1)
-            frame1[not_black] = rectified_image[not_black]
-
+            draw_cube_texture([cube[3],cube[7],cube[4],cube[0]])
+            draw_cube_texture([cube[3],cube[7],cube[6],cube[2]])
          
     last_time = time.time()
     cv2.imshow('frame',frame1)
-
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         flicker = AR_active/total_frames
