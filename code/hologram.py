@@ -1,7 +1,9 @@
 import cv2
-import cv2.aruco as aruco
-import numpy as np
+import os
 import time
+from cvzone.SelfiSegmentationModule import SelfiSegmentation
+import numpy as np
+import cv2.aruco as aruco
 
 
 def shift(list_of_items, amount):
@@ -104,27 +106,53 @@ def get_holo_points(cube, tag_id):
 
 
 
+def glow_effect(no_bg):
+    # increase contrast
+    gray = cv2.cvtColor(no_bg, cv2.COLOR_BGR2GRAY)
+    eq = cv2.equalizeHist(gray)
+    no_bg = cv2.cvtColor(eq, cv2.COLOR_GRAY2BGR)
+
+    # add scan lines
+    pattern = np.zeros_like(no_bg, dtype=np.uint8)
+    pattern[::5, :, :] = no_bg[::5, :, :]/7
+    no_bg = cv2.addWeighted(no_bg, 1, pattern, 0.6, 0)
+    
+
+    # make subject cyan
+    no_bg[:, :, 1] = no_bg[:, :, 1]/1.5
+    no_bg[:, :, 2] = 0
+
+    # add glow
+    glow = cv2.GaussianBlur(no_bg, (101, 101), 0)
+    black = np.all(no_bg == 0, axis=-1)
+    no_bg[black] = glow[black]
+
+    return no_bg
+
+webcam = cv2.VideoCapture(0)
+(widthweb,heightweb) = (int(webcam.get(3)), int(webcam.get(4)))
+
+os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;udp;buffer_size;2'
+cap = cv2.VideoCapture('rtsp://10.1.19.54/video', cv2.CAP_FFMPEG)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+(width,height) = (int(cap.get(3)), int(cap.get(4)))
+
 apriltag_dict = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
 param = aruco.DetectorParameters()
-
 
 image = cv2.imread('COMP-Final-Project/code/pics/up.png', cv2.IMREAD_UNCHANGED)
 image = image[:, :, :3]
 (img_w,img_h) = (512,512)
 img_corners = np.array([[(0,0), (img_w,0), (img_w, img_h), (0, img_h)]], dtype="float32")
 
-holo = cv2.imread('COMP-Final-Project/code/pics/hologram.png', cv2.IMREAD_UNCHANGED)
-holo = holo[:, :, :3]
-(holo_w,holo_h) = (256,420)
-holo_corners = np.array([[(0,0), (holo_w,0), (holo_w, holo_h), (0, holo_h)]], dtype="float32")
+human_weights = cv2.CascadeClassifier('COMP-Final-Project\code\haarcascade_fullbody.xml')
 
-path = "COMP-Final-Project\code\pics\cube2.mp4"
-cap = cv2.VideoCapture(0)
-(width,height) = (int(cap.get(3)), int(cap.get(4)))
+background_image = cv2.resize(cv2.imread("COMP-Final-Project/code/pics/black.png"), (256, 420)) 
+segmentor = SelfiSegmentation(0)
 
 # Camera parameters (assumed)
-focal_length = width
-center = (width / 2, height / 2)
+focal_length = widthweb
+center = (widthweb / 2, heightweb / 2)
 camera_matrix = np.array(
     [[focal_length, 0, center[0]],
         [0, focal_length, center[1]],
@@ -134,23 +162,79 @@ camera_matrix = np.array(
 # Assuming no lens distortion
 dist_coeffs = np.zeros((4, 1))
 
-# FPS variables
-prev_time = time.time()
-keep_delta = []
-print_delta = 0
-print_fps = 0
+x = 0
+y = 0
+w = width
+h = height
+bounds = []
+avg = (0,0,width,height)
+running_avg = 5
 
+last_time = time.time()
+ret, frame = cap.read()
 while(True):
-    #time.sleep(1/20)
 
-    ret, frame = cap.read()
-    frame = cv2.resize(frame, (640, 480))
+    now = time.time()
+    frames = int(30*(now-last_time))
+    for _ in range(frames + 2):
+        ret, frame = cap.read()
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    frame = cv2.resize(frame,(853,480))
+    frame = frame[0:0 + 480, 106:106 + 640]
 
-    corners, ids, _ = aruco.detectMarkers(frame, apriltag_dict, parameters=param)
+    cv2.imshow("extracam", frame)
+
+    ret, frame1 = webcam.read()
+    frame1 = cv2.resize(frame1, (640, 480))
+    gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+    corners, ids, _ = aruco.detectMarkers(frame1, apriltag_dict, parameters=param)
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY ) 
+    humans = human_weights.detectMultiScale(gray, 1.5, 1)
+    
+    largest = 0
+
+    for (xi,yi,wi,hi) in humans:
+        size = w*h
+        if size > largest:
+            largest = size
+            x,y,w,h = (xi,yi,wi,hi)
 
 
+    bounds.append((x,y,w,h))
+    avgx, avgy, avgw, avgh = 0,0,0,0
+
+    iterator = len(bounds)
+    if iterator > running_avg:
+        iterator = running_avg
+
+    if iterator != 0:
+
+        for i in range(iterator):
+            xi,yi,wi,hi = bounds[-i]
+            avgx += xi
+            avgy += yi
+            avgw += wi
+            avgh += hi
+
+        avgx = int(avgx/iterator)
+        avgy = int(avgy/iterator)
+        avgw = int(avgw/iterator)
+        avgh = int(avgh/iterator)
+            
+
+        cropped = frame[avgy:avgy + avgh, avgx:avgx + avgw]
+        resized = cv2.resize(cropped,(256,420))
+        #cv2.rectangle(frame,(avgx,avgy),(avgx+avgw,avgy+avgh),(255,0,0),2)
+        
+        # cut background
+        no_bg = segmentor.removeBG(resized, background_image, cutThreshold=0.6)
+        
+        # add glow effect
+        no_bg = glow_effect(no_bg)
+
+        cv2.imshow("Cropped BG removed", no_bg)
+        
     if ids is not None:
         idx = np.argmax(ids)
         corners = np.array([corners[idx]], dtype="float32")
@@ -162,33 +246,26 @@ while(True):
         holo_points = get_holo_points(cube,ids[0])
 
         for i in range(len(cube)):
-            cv2.circle(frame,cube[i],4,(255),4)
-            cv2.putText(frame,str(i),cube[i],cv2.FONT_HERSHEY_SIMPLEX,1.0,(255,255,0),1)
+            cv2.circle(frame1,cube[i],4,(255),4)
+            cv2.putText(frame1,str(i),cube[i],cv2.FONT_HERSHEY_SIMPLEX,1.0,(255,255,0),1)
 
+        (holo_w,holo_h) = (256,420)
+        holo_corners = np.array([[(0,0), (holo_w,0), (holo_w, holo_h), (0, holo_h)]], dtype="float32")
+
+        transformation_matrix = cv2.getPerspectiveTransform(holo_corners, np.array(holo_points, dtype="float32"))
+        rectified_image = cv2.warpPerspective(no_bg, transformation_matrix, (640, 480))
+        cv2.imshow("rectified", rectified_image)
+        # combine rectified image with frame 1
+        frame1 = cv2.add(rectified_image, frame1)
 
         transformation_matrix = cv2.getPerspectiveTransform(img_corners, corners[0])
         rectified_image = cv2.warpPerspective(image, transformation_matrix, (640, 480))
         not_black = np.all(rectified_image != 0, axis=-1)
-        frame[not_black] = rectified_image[not_black]
+        frame1[not_black] = rectified_image[not_black]
+         
+    last_time = time.time()
+    cv2.imshow('frame',frame1)
 
-        transformation_matrix = cv2.getPerspectiveTransform(holo_corners, np.array(holo_points, dtype="float32"))
-        rectified_image = cv2.warpPerspective(holo, transformation_matrix, (640, 480))
-        not_black = np.all(rectified_image != 0, axis=-1)
-        frame[not_black] = rectified_image[not_black]
-
-    time_delta = time.time() - prev_time
-    prev_time = time.time()
-    keep_delta.append(time_delta)
-    if len(keep_delta) == 30:
-        print_delta = np.mean(keep_delta) * 1000
-        print_fps = 1/np.mean(keep_delta)
-
-        keep_delta, keep_score = [], []
-
-    cv2.putText(frame, f"{'FPS: '} {print_fps:.2f}",(8,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(0,0,0),1, cv2.LINE_AA)
-    cv2.putText(frame, f"{'Delay:'} {print_delta:.0f} ms",(8,36), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(0,0,0),1, cv2.LINE_AA)
-
-    cv2.imshow('frame',frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
