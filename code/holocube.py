@@ -116,8 +116,6 @@ def get_holo_points(cube, tag_id):
 
     return [p1,p2,p3,p4]
 
-
-
 def glow_effect(no_bg):
     # increase contrast
     gray = cv2.cvtColor(no_bg, cv2.COLOR_BGR2GRAY)
@@ -238,7 +236,7 @@ while(True):
         ids = np.array([ids[idx]])
 
         corners = fix_corners(corners, ids)
-        corners = scale(corners,1.8)
+        corners = scale(corners,1.9)
         cube = find_cube_corners(corners)
         center_corner_index = find_center_corner(cube)
         
@@ -271,8 +269,8 @@ while(True):
     cv2.imshow('frame',frame1)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
-        flicker = AR_active/total_frames
-        print('Flicker: ',flicker)
+        flicker = (1- AR_active/total_frames)*100.0
+        print('Flicker: ',flicker,'%')
         time.sleep(0.5)
         break
 
