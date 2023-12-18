@@ -115,7 +115,11 @@ def get_holo_points(cube, tag_id):
             p2 = [int(p3[0]-v[0]),int(p3[1]-v[1])]
             p1 = [int(p4[0]-u[0]),int(p4[1]-u[1])]
 
-    return [p1,p2,p3,p4]
+    result = [p1,p2,p3,p4]
+    if tag_id in [4,5]:
+        result = [p2,p1,p4,p3]
+
+    return result
 
 def glow_effect(no_bg):
     # increase contrast
@@ -173,141 +177,152 @@ class FrameCaptureThread:
         self.running = False
         self.thread.join()
 
-# laptop cam
-webcam = cv2.VideoCapture(0)
-(widthweb,heightweb) = (int(webcam.get(3)), int(webcam.get(4)))
+try:
 
-# Mobile cam
-os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;udp;buffer_size;2'
-#cap = cv2.VideoCapture('rtsp://10.1.19.54/video', cv2.CAP_FFMPEG)
-cap = cv2.VideoCapture('rtsp://10.6.15.171/video', cv2.CAP_FFMPEG)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-(width,height) = (int(cap.get(3)), int(cap.get(4)))
+    # laptop cam
+    print("get pc camera")
+    webcam = cv2.VideoCapture(0)
+    (widthweb,heightweb) = (int(webcam.get(3)), int(webcam.get(4)))
 
-# Start the frame capture thread
-frame_thread = FrameCaptureThread(cap)
-frame_thread.start()
+    # Mobile cam
+    print("get mobile camera")
+    os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;udp;buffer_size;2'
+    #cap = cv2.VideoCapture('rtsp://10.1.19.54/video', cv2.CAP_FFMPEG)
+    cap = cv2.VideoCapture('rtsp://10.1.19.9/video', cv2.CAP_FFMPEG)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    (width,height) = (int(cap.get(3)), int(cap.get(4)))
 
-apriltag_dict = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
-param = aruco.DetectorParameters()
+    # Start the frame capture thread
+    print("start thread")
+    frame_thread = FrameCaptureThread(cap)
+    frame_thread.start()
 
-# Cube texture
-image = cv2.imread('COMP-Final-Project\code\pics\AI_texture.png', cv2.IMREAD_UNCHANGED)
-image = image[:, :, :3]
-(img_w,img_h) = (1024,1024)
-img_corners = np.array([[(0,0), (img_w,0), (img_w, img_h), (0, img_h)]], dtype="float32")
+    print("init april tag detector")
+    apriltag_dict = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
+    param = aruco.DetectorParameters()
 
-#human_weights = cv2.CascadeClassifier('COMP-Final-Project\code\haarcascade_fullbody.xml')
+    # Cube texture
+    image = cv2.imread('COMP-Final-Project\code\pics\AI_texture.png', cv2.IMREAD_UNCHANGED)
+    image = image[:, :, :3]
+    (img_w,img_h) = (1024,1024)
+    img_corners = np.array([[(0,0), (img_w,0), (img_w, img_h), (0, img_h)]], dtype="float32")
 
-background_image = cv2.resize(cv2.imread("COMP-Final-Project/code/pics/black.png"), (640, 480)) 
-segmentor = SelfiSegmentation(0)
+    #human_weights = cv2.CascadeClassifier('COMP-Final-Project\code\haarcascade_fullbody.xml')
 
-# Camera parameters (assumed)
-focal_length = widthweb
-center = (widthweb / 2, heightweb / 2)
-camera_matrix = np.array(
-    [[focal_length, 0, center[0]],
-        [0, focal_length, center[1]],
-        [0, 0, 1]], dtype="double"
-)
+    background_image = cv2.resize(cv2.imread("COMP-Final-Project/code/pics/black.png"), (640, 480)) 
+    print("init background remover")
+    segmentor = SelfiSegmentation(0)
 
-# Assuming no lens distortion
-dist_coeffs = np.zeros((4, 1))
+    # Camera parameters (assumed)
+    focal_length = widthweb
+    center = (widthweb / 2, heightweb / 2)
+    camera_matrix = np.array(
+        [[focal_length, 0, center[0]],
+            [0, focal_length, center[1]],
+            [0, 0, 1]], dtype="double"
+    )
 
-x = 0
-y = 0
-w = width
-h = height
-bounds = []
-avg = (0,0,width,height)
-running_avg = 5
+    # Assuming no lens distortion
+    dist_coeffs = np.zeros((4, 1))
 
-last_time = time.time()
-ret, frame = cap.read()
+    x = 0
+    y = 0
+    w = width
+    h = height
+    bounds = []
+    avg = (0,0,width,height)
+    running_avg = 5
 
-# Measuring flicker
-box_in_frame = False
-total_frames = 0
-AR_active = 0
-
-while(True):
-
-    now = time.time()
-    # Read and discard frames in the buffer to get the most recent frame
-    frame = frame_thread.get_latest_frame()
-    if frame is None:
-        continue  # Skip the rest of the loop if no frame is retrieved
-
-    frame = cv2.resize(frame,(853,480))
-    frame = frame[0:0 + 480, 106:106 + 640]
-
-    cv2.imshow("extracam", frame)
-
-    ret, frame1 = webcam.read()
-    frame1 = cv2.resize(frame1, (640, 480))
-    gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
-    corners, ids, _ = aruco.detectMarkers(frame1, apriltag_dict, parameters=param)
-
-    # cut background
-    no_bg = segmentor.removeBG(frame, background_image, cutThreshold=0.05)
-    # add glow effect
-    no_bg = glow_effect(no_bg)
-    
-    cv2.imshow("Cropped BG removed", no_bg)
-
-    if box_in_frame:
-        total_frames += 1
-    
-    if ids is not None:
-        box_in_frame = True
-        AR_active += 1
-
-        idx = np.argmax(ids)
-        corners = np.array([corners[idx]], dtype="float32")
-        ids = np.array([ids[idx]])
-
-        corners = fix_corners(corners, ids)
-        corners = scale(corners,1.9)
-        cube = find_cube_corners(corners)
-        center_corner_index = find_center_corner(cube)
-        
-        holo_points = get_holo_points(cube,ids[0])
-        (holo_w,holo_h) = (640,480)
-        holo_corners = np.array([[(0,0), (holo_w,0), (holo_w, holo_h), (0, holo_h)]], dtype="float32")
-
-        transformation_matrix = cv2.getPerspectiveTransform(holo_corners, np.array(holo_points, dtype="float32"))
-        rectified_hologram = cv2.warpPerspective(no_bg, transformation_matrix, (640, 480))
-        frame1 = cv2.add(rectified_hologram, frame1)
-        
-        # Draw only the faces connected to the center corner
-        if center_corner_index == 0:
-            draw_cube_texture([cube[3],cube[7],cube[4],cube[0]])
-            frame1 = cv2.add(rectified_hologram, frame1)
-            draw_cube_texture([cube[0],cube[4],cube[5],cube[1]])
-        elif center_corner_index == 1:
-            draw_cube_texture([cube[1],cube[5],cube[6],cube[2]])
-            frame1 = cv2.add(rectified_hologram, frame1)
-            draw_cube_texture([cube[1],cube[5],cube[4],cube[0]])
-        elif center_corner_index == 2:
-            draw_cube_texture([cube[2],cube[6],cube[7],cube[3]])
-            frame1 = cv2.add(rectified_hologram, frame1)
-            draw_cube_texture([cube[2],cube[1],cube[5],cube[6]])
-        elif center_corner_index == 3:
-            draw_cube_texture([cube[3],cube[7],cube[6],cube[2]])
-            frame1 = cv2.add(rectified_hologram, frame1)
-            draw_cube_texture([cube[3],cube[7],cube[4],cube[0]])
-        draw_cube_texture(corners[0])
-          
     last_time = time.time()
-    cv2.imshow('frame',frame1)
-    print(1/(now-last_time))
+    ret, frame = cap.read()
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        flicker = (1- AR_active/total_frames)*100.0
-        print('Flicker: ',flicker,'%')
-        time.sleep(0.5)
-        break
+    # Measuring flicker
+    box_in_frame = False
+    total_frames = 0
+    AR_active = 0
 
-cap.release()
-frame_thread.stop()
-cv2.destroyAllWindows()
+    while(True):
+
+        now = time.time()
+        # Read and discard frames in the buffer to get the most recent frame
+        frame = frame_thread.get_latest_frame()
+        if frame is None:
+            continue  # Skip the rest of the loop if no frame is retrieved
+
+        frame = cv2.resize(frame,(853,480))
+        frame = frame[0:0 + 480, 106:106 + 640]
+
+        cv2.imshow("extracam", frame)
+
+        ret, frame1 = webcam.read()
+        frame1 = cv2.resize(frame1, (640, 480))
+        gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        corners, ids, _ = aruco.detectMarkers(frame1, apriltag_dict, parameters=param)
+
+        # cut background
+        no_bg = segmentor.removeBG(frame, background_image, cutThreshold=0.05)
+        # add glow effect
+        no_bg = glow_effect(no_bg)
+        
+        cv2.imshow("Cropped BG removed", no_bg)
+
+        if box_in_frame:
+            total_frames += 1
+        
+        if ids is not None:
+            box_in_frame = True
+            AR_active += 1
+
+            idx = np.argmax(ids)
+            corners = np.array([corners[idx]], dtype="float32")
+            ids = np.array([ids[idx]])
+
+            corners = fix_corners(corners, ids)
+            corners = scale(corners,1.9)
+            cube = find_cube_corners(corners)
+            center_corner_index = find_center_corner(cube)
+            
+            holo_points = get_holo_points(cube,ids[0])
+            (holo_w,holo_h) = (640,480)
+            holo_corners = np.array([[(0,0), (holo_w,0), (holo_w, holo_h), (0, holo_h)]], dtype="float32")
+
+            transformation_matrix = cv2.getPerspectiveTransform(holo_corners, np.array(holo_points, dtype="float32"))
+            rectified_hologram = cv2.warpPerspective(no_bg, transformation_matrix, (640, 480))
+            frame1 = cv2.add(rectified_hologram, frame1)
+            
+            # Draw only the faces connected to the center corner
+            if center_corner_index == 0:
+                draw_cube_texture([cube[3],cube[7],cube[4],cube[0]])
+                frame1 = cv2.add(rectified_hologram, frame1)
+                draw_cube_texture([cube[0],cube[4],cube[5],cube[1]])
+            elif center_corner_index == 1:
+                draw_cube_texture([cube[1],cube[5],cube[6],cube[2]])
+                frame1 = cv2.add(rectified_hologram, frame1)
+                draw_cube_texture([cube[1],cube[5],cube[4],cube[0]])
+            elif center_corner_index == 2:
+                draw_cube_texture([cube[2],cube[6],cube[7],cube[3]])
+                frame1 = cv2.add(rectified_hologram, frame1)
+                draw_cube_texture([cube[2],cube[1],cube[5],cube[6]])
+            elif center_corner_index == 3:
+                draw_cube_texture([cube[3],cube[7],cube[6],cube[2]])
+                frame1 = cv2.add(rectified_hologram, frame1)
+                draw_cube_texture([cube[3],cube[7],cube[4],cube[0]])
+            draw_cube_texture(corners[0])
+            
+        last_time = time.time()
+        cv2.imshow('frame',frame1)
+        print(1/(now-last_time))
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            flicker = (1- AR_active/total_frames)*100.0
+            print('Flicker: ',flicker,'%')
+            time.sleep(0.5)
+            break
+
+    cap.release()
+    frame_thread.stop()
+    cv2.destroyAllWindows()
+except:
+    cap.release()
+    frame_thread.stop()
+    cv2.destroyAllWindows()
